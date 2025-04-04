@@ -1,4 +1,4 @@
-function DataCard({ item }) {  // Changed from pet to item to match Dashboard's prop
+function DataCard({ item }) {
     return (
       <div className="data-card">
         <h3>{item.name || 'Unnamed Pet'}</h3>

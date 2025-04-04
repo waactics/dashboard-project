@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard';
+import StatsDashboard from './components/StatsDashboard';
 import './styles/App.css';
 
 function App() {
@@ -20,13 +21,17 @@ function App() {
       const response = await fetch('https://api.petfinder.com/v2/oauth2/token', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Type': 'application/json',
         },
-        body: `grant_type=client_credentials&client_id=${API_KEY}&client_secret=${API_SECRET}`
+        body: JSON.stringify({
+          grant_type: 'client_credentials',
+          client_id: API_KEY,
+          client_secret: API_SECRET
+        })
       });
 
       if (!response.ok) {
-        throw new Error('Failed to authenticate with PetFinder API');
+        throw new Error(`Authentication failed with status ${response.status}`);
       }
 
       const data = await response.json();
@@ -37,7 +42,7 @@ function App() {
     }
   };
 
-  // fetch pets from api
+  // fetch pets from API
   const fetchPets = async () => {
     try {
       setIsLoading(true);
@@ -47,46 +52,77 @@ function App() {
       const token = await getAccessToken();
       setAccessToken(token);
       
-      // then fetch pets
+      // then fetch pets with retry logic
       const petsResponse = await fetch('https://api.petfinder.com/v2/animals?limit=100', {
         headers: {
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
       });
 
       if (!petsResponse.ok) {
-        throw new Error('Failed to fetch pets data');
+        // if unauthorized, try refreshing token once
+        if (petsResponse.status === 401) {
+          const newToken = await getAccessToken();
+          setAccessToken(newToken);
+          const retryResponse = await fetch('https://api.petfinder.com/v2/animals?limit=100', {
+            headers: {
+              'Authorization': `Bearer ${newToken}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          if (!retryResponse.ok) {
+            throw new Error(`Failed to fetch pets: ${retryResponse.status}`);
+          }
+          
+          const retryData = await retryResponse.json();
+          setPets(retryData.animals || []);
+          setFilteredPets((retryData.animals || []).slice(0, 10));
+          return;
+        }
+        
+        throw new Error(`Failed to fetch pets: ${petsResponse.status}`);
       }
 
       const result = await petsResponse.json();
-      setPets(result.animals || []);
-      setFilteredPets((result.animals || []).slice(0, 10)); // Show first 10 by default
+      const petsData = result.animals || [];
+      setPets(petsData);
+      setFilteredPets(petsData.slice(0, 10));
     } catch (err) {
       setError(err.message);
+      setPets([]);
+      setFilteredPets([]);
+      console.error('API Error:', err);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // handle search
-  const handleSearch = (searchTerm) => {
-    if (!searchTerm) {
+  // handle search and filters
+  const handleSearch = (searchTerm, filters = {}) => {
+    if (!searchTerm && !filters.type && !filters.gender && !filters.age) {
       setFilteredPets(pets.slice(0, 10));
       return;
     }
     
-    const term = searchTerm.toLowerCase();
-    const filtered = pets.filter(pet => 
-      pet.name?.toLowerCase().includes(term) ||
-      pet.breeds?.primary?.toLowerCase().includes(term) ||
-      pet.type?.toLowerCase().includes(term) ||
-      pet.gender?.toLowerCase().includes(term) ||
-      pet.description?.toLowerCase().includes(term)
-    );
+    const term = searchTerm?.toLowerCase() || '';
+    const filtered = pets.filter(pet => {
+      const matchesSearch = !term || 
+        pet.name?.toLowerCase().includes(term) ||
+        pet.breeds?.primary?.toLowerCase().includes(term) ||
+        pet.description?.toLowerCase().includes(term);
+      
+      const matchesType = !filters.type || pet.type === filters.type;
+      const matchesGender = !filters.gender || pet.gender === filters.gender;
+      const matchesAge = !filters.age || pet.age === filters.age;
+      
+      return matchesSearch && matchesType && matchesGender && matchesAge;
+    });
+    
     setFilteredPets(filtered.slice(0, 10));
   };
 
-  // initial data fetch
   useEffect(() => {
     fetchPets();
   }, []);
@@ -98,9 +134,16 @@ function App() {
         onSearch={handleSearch} 
       />
       
+      <StatsDashboard pets={filteredPets} />
+      
       <main>
         {isLoading && <div className="loading">Loading pets data...</div>}
-        {error && <div className="error">{error}</div>}
+        {error && (
+          <div className="error">
+            {error}
+            <button onClick={fetchPets} className="retry-btn">Retry</button>
+          </div>
+        )}
         {!isLoading && !error && (
           <Dashboard pets={filteredPets} />
         )}

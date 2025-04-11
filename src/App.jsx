@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard';
 import StatsDashboard from './components/StatsDashboard';
+import AnimalDetail from './components/AnimalDetail';
+import { fetchAnimals, fetchAnimalById } from './apiService';
 import './styles/App.css';
 
 function App() {
@@ -9,91 +12,42 @@ function App() {
   const [filteredPets, setFilteredPets] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [accessToken, setAccessToken] = useState('');
 
-  // petfinder api credentials
-  const API_KEY = 'eVxejWL2rnLsigLC3kyL4WsitGCXnooIbZCyazhNholCA4Gdyo';
-  const API_SECRET = 'TpqFgmetg56yNYr8DBnFBtpef4ImFjoomRiv1Aww';
-
-  // get oauth token
-  const getAccessToken = async () => {
+  const loadAnimalDetails = async (id) => {
     try {
-      const response = await fetch('https://api.petfinder.com/v2/oauth2/token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          grant_type: 'client_credentials',
-          client_id: API_KEY,
-          client_secret: API_SECRET
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Authentication failed with status ${response.status}`);
+      setIsLoading(true);
+      // First check if animal exists in cached pets
+      const cachedAnimal = pets.find(pet => pet.id.toString() === id);
+      if (cachedAnimal) {
+        setSelectedAnimal(cachedAnimal);
+        return;
       }
-
-      const data = await response.json();
-      return data.access_token;
-    } catch (err) {
-      console.error('Error getting access token:', err);
-      throw err;
+      
+      // If not in cache, fetch from API
+      const response = await fetchAnimalById(id);
+      setSelectedAnimal(response.animal);
+    } catch (error) {
+      setError(error.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // fetch pets from API
+  // fetch pets from api
   const fetchPets = async () => {
     try {
       setIsLoading(true);
       setError(null);
-      
-      // first get access token
-      const token = await getAccessToken();
-      setAccessToken(token);
-      
-      // then fetch pets with retry logic
-      const petsResponse = await fetch('https://api.petfinder.com/v2/animals?limit=100', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
 
-      if (!petsResponse.ok) {
-        // if unauthorized, try refreshing token once
-        if (petsResponse.status === 401) {
-          const newToken = await getAccessToken();
-          setAccessToken(newToken);
-          const retryResponse = await fetch('https://api.petfinder.com/v2/animals?limit=100', {
-            headers: {
-              'Authorization': `Bearer ${newToken}`,
-              'Content-Type': 'application/json'
-            }
-          });
-          
-          if (!retryResponse.ok) {
-            throw new Error(`Failed to fetch pets: ${retryResponse.status}`);
-          }
-          
-          const retryData = await retryResponse.json();
-          setPets(retryData.animals || []);
-          setFilteredPets((retryData.animals || []).slice(0, 10));
-          return;
-        }
-        
-        throw new Error(`Failed to fetch pets: ${petsResponse.status}`);
-      }
-
-      const result = await petsResponse.json();
+      const result = await fetchAnimals();
       const petsData = result.animals || [];
+
       setPets(petsData);
       setFilteredPets(petsData.slice(0, 10));
     } catch (err) {
       setError(err.message);
       setPets([]);
       setFilteredPets([]);
-      console.error('API Error:', err);
     } finally {
       setIsLoading(false);
     }
@@ -123,11 +77,8 @@ function App() {
     setFilteredPets(filtered.slice(0, 10));
   };
 
-  useEffect(() => {
-    fetchPets();
-  }, []);
-
   return (
+    <Router>
     <div className="app">
       <Header 
         onRefresh={fetchPets} 
@@ -144,11 +95,17 @@ function App() {
             <button onClick={fetchPets} className="retry-btn">Retry</button>
           </div>
         )}
-        {!isLoading && !error && (
-          <Dashboard pets={filteredPets} />
-        )}
+        <Routes>
+          <Route path="/" element={<Dashboard pets={filteredPets} />} />
+          <Route
+            path="/animal/:id"
+            element={ <AnimalDetail pets={pets}/> }
+          />
+          <Route path="*" element={<div>404 - Page Not Found</div>} />
+        </Routes>
       </main>
     </div>
+    </Router>
   );
 }
 

@@ -25,7 +25,7 @@ function Header({ onRefresh, onSearch, onFilter }) {
   
     return (
       <header>
-        <h1>Pet Dashboard</h1>
+        <h1>FurEver Friend Finder</h1>
         <div className="features">
           <button onClick={onRefresh}>Refresh Data</button>
           <input 
